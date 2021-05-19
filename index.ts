@@ -3,7 +3,7 @@
  * Based on https://askubuntu.com/a/1267328/170380
  */
 
-import { exec } from 'child_process'
+import { GSettings } from './src/GSettings'
 import dbus from 'dbus-next'
 
 const sessionBus = dbus.sessionBus()
@@ -44,32 +44,21 @@ const main = async () => {
         throw new Error('Could not determine current display mode')
     }
 
-    const execAsync = (command: string): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            exec(command, (err, stdout, stderr) => {
-                if (stderr.length > 0) console.error(stderr)
-                if (err) {
-                    reject(err)
-                } else {
-                    resolve(stdout.replace(/\r?\n$/, ''))
-                }
-            })
-        })
-    }
+    const mutter = new GSettings().schema('org.gnome.mutter')
+    const featuresText = await mutter.get('experimental-features')
+    const featuresJson: string[] = JSON.parse(featuresText.replace(/'/g, '"'))
 
     const fractionalScalingKey = 'x11-randr-fractional-scaling'
-    const featuresText = await execAsync('gsettings get org.gnome.mutter experimental-features')
-    const featuresJson: string[] = JSON.parse(featuresText.replace(/^@as /, '').replace(/'/g, '"'))
 
     if ( ! featuresJson.includes(fractionalScalingKey)) {
         console.log('Enabling Mutter Experimental Feature:', fractionalScalingKey)
         const value = JSON.stringify(featuresJson.concat(fractionalScalingKey)).replace(/"/g, '\'')
-        await execAsync(`gsettings set org.gnome.mutter experimental-features "${value}"`)
+        await mutter.set('experimental-features', value)
         scale = 1.25
     } else {
         console.log('Disabling Mutter Experimental Feature:', fractionalScalingKey)
         const value = JSON.stringify(featuresJson.filter(v => v !== fractionalScalingKey)).replace(/"/g, '\'')
-        await execAsync(`gsettings set org.gnome.mutter experimental-features "${value}"`)
+        await mutter.set('experimental-features', value)
         scale = 1
     }
 

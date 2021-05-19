@@ -10,8 +10,8 @@
     "url": "https://gitlab.com/andrewmackrodt/gnome-scale-switcher"
   },
   "scripts": {
-    "lint": "eslint --ext .ts index.ts",
-    "lint:fix": "eslint --ext .ts --fix index.ts",
+    "lint": "eslint --ext .ts src/ index.ts",
+    "lint:fix": "eslint --ext .ts --fix src/ index.ts",
     "start": "ts-node-dev index"
   },
   "dependencies": {
