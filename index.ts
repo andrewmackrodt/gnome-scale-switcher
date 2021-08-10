@@ -6,8 +6,6 @@
 import { GSettings } from './src/GSettings'
 import dbus from 'dbus-next'
 
-const sessionBus = dbus.sessionBus()
-
 const fractionalModeSet: ModeSet = {
     width: 3840,
     height: 2160,
@@ -21,6 +19,9 @@ const nonFractionalModeSet: ModeSet = {
     refresh: 120,
     scale: 1,
 }
+
+const mutter = new GSettings().schema('org.gnome.mutter')
+const fractionalScalingKey = 'x11-randr-fractional-scaling'
 
 interface ModeSet {
     width: number
@@ -75,55 +76,83 @@ function getModeAlias(connected: any, modeSet: ModeSet): string {
     return mode[0]
 }
 
-async function main() {
-    const mutter = new GSettings().schema('org.gnome.mutter')
+async function getExperimentalFeatures(): Promise<string[]> {
     const featuresText = await mutter.get('experimental-features')
-    const featuresJson: string[] = JSON.parse(featuresText.replace(/'/g, '"'))
-    const fractionalScalingKey = 'x11-randr-fractional-scaling'
 
-    let modeSet: ModeSet
+    return JSON.parse(featuresText.replace(/'/g, '"'))
+}
 
-    if ( ! featuresJson.includes(fractionalScalingKey)) {
+async function getFractionalScaling(): Promise<boolean> {
+    const featuresJson = await getExperimentalFeatures()
+
+    return featuresJson.includes(fractionalScalingKey)
+}
+
+async function setFractionalScaling(enabled: boolean): Promise<void> {
+    const featuresJson = await getExperimentalFeatures()
+
+    if (enabled) {
         console.log('Enabling Mutter Experimental Feature:', fractionalScalingKey)
         const value = JSON.stringify(featuresJson.concat(fractionalScalingKey)).replace(/"/g, '\'')
         await mutter.set('experimental-features', value)
-        modeSet = fractionalModeSet
     } else {
         console.log('Disabling Mutter Experimental Feature:', fractionalScalingKey)
         const value = JSON.stringify(featuresJson.filter(v => v !== fractionalScalingKey)).replace(/"/g, '\'')
         await mutter.set('experimental-features', value)
-        modeSet = nonFractionalModeSet
     }
-
-    const namespace = 'org.gnome.Mutter.DisplayConfig'
-    const path = '/org/gnome/Mutter/DisplayConfig'
-    const proxyObject = await sessionBus.getProxyObject(namespace, path)
-    const iface = proxyObject.getInterface(namespace)
-    const display = await getDisplay(iface)
-    const modeAlias = getModeAlias(display.connected, modeSet)
-
-    const config = [
-        [
-            display.logical[0],
-            display.logical[1],
-            modeSet.scale,
-            display.logical[3],
-            display.logical[4],
-            [
-                [
-                    display.connector,
-                    modeAlias,
-                    {},
-                ],
-            ],
-        ],
-    ]
-
-    console.log('Applying Config:', JSON.stringify(config))
-
-    await iface.ApplyMonitorsConfig(display.currentState[0], 1, config, {})
 }
 
-main().finally(() => {
-    sessionBus.disconnect()
-})
+async function setResolution(modeSet: ModeSet): Promise<void> {
+    const namespace = 'org.gnome.Mutter.DisplayConfig'
+    const path = '/org/gnome/Mutter/DisplayConfig'
+    const sessionBus = dbus.sessionBus()
+
+    try {
+        const proxyObject = await sessionBus.getProxyObject(namespace, path)
+        const iface = proxyObject.getInterface(namespace)
+        const display = await getDisplay(iface)
+        const modeAlias = getModeAlias(display.connected, modeSet)
+
+        const config = [
+            [
+                display.logical[0],
+                display.logical[1],
+                modeSet.scale,
+                display.logical[3],
+                display.logical[4],
+                [
+                    [
+                        display.connector,
+                        modeAlias,
+                        {},
+                    ],
+                ],
+            ],
+        ]
+
+        console.log('Applying Config:', JSON.stringify(config))
+
+        return await iface.ApplyMonitorsConfig(display.currentState[0], 1, config, {})
+    } finally {
+        sessionBus.disconnect()
+    }
+}
+
+async function main() {
+    const isFractionalScaling = await getFractionalScaling()
+
+    // todo detect display reactivation before setting resolution
+    const sleep = () => new Promise(resolve => setTimeout(resolve, 10000))
+
+    if (isFractionalScaling) {
+        await setFractionalScaling(false)
+        await sleep()
+        await setResolution(nonFractionalModeSet)
+    } else {
+        await setFractionalScaling(true)
+        await sleep()
+        await setResolution(fractionalModeSet)
+    }
+}
+
+void main()
